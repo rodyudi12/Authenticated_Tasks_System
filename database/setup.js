@@ -7,7 +7,26 @@ const db = new Sequelize({
   storage: `database/${process.env.DB_NAME}` || 'database/task_management.db',
   logging: console.log
 });
-
+// Define User model
+const User = db.define('User', {
+    id: {
+        type: DataTypes.INTEGER,
+        primaryKey: true,
+        autoIncrement: true
+    },
+    username: {
+        type: DataTypes.STRING,
+        allowNull: false
+    },
+    email: {
+        type: DataTypes.STRING,
+        allowNull: false
+    },
+    password: {
+        type: DataTypes.STRING,
+        allowNull: false
+    }
+});
 // Define Project model
 const Project = db.define('Project', {
     id: {
@@ -66,8 +85,20 @@ const Task = db.define('Task', {
     }
 });
 
+//User can have many projects
+User.hasMany(Project, { foreignKey: 'userId', onDelete: 'CASCADE' });
+
+//Every Project belongs to Users
+Project.belongsTo(User, { foreignKey: 'userId' });
+
+//Projects can have many tasks
+Project.hasMany(Task, { foreignKey: 'projectId', onDelete: 'CASCADE' });
+
+//Every tasks belongs to a Project
+Task.belongsTo(Project, { foreignKey: 'projectId' });
+
 // Export for use in other files
-module.exports = { db, Project, Task };
+module.exports = { db, User, Project, Task };
 
 // Create database and tables
 async function setupDatabase() {

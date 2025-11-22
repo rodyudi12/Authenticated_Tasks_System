@@ -1,11 +1,29 @@
 const express = require('express');
-const { db, Project, Task } = require('./database/setup');
+const bcrypt = require('bcrypt');
+const session = require('express-session');
+const { db, User, Project, Task } = require('./database/setup');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(express.json());
+
+app.use(session({
+    secret: 'your-secret-key', // change to a secure string
+    resave: false,
+    saveUninitialized: false,
+    cookie: { secure: false } // true if using HTTPS
+}));
+
+function isAuthenticated(req, res, next) {
+    if (req.session && req.session.user) {
+        req.user = req.session.user;
+        return next();
+    } else {
+        return res.status(401).json({ message: 'Unauthorized: Please log in.' });
+    }
+}
 
 // Test database connection
 async function testConnection() {
@@ -18,11 +36,94 @@ async function testConnection() {
 }
 
 testConnection();
+//User Registration
+app.post('/api/register', async (req, res) => {
+    try {
+        const { username, email, password } = req.body;
 
+        // Validate input
+        if (!username || !email || !password) {
+            return res.status(400).json({ message: 'Please provide username, email, and password.' });
+        }
+
+        // Check if email already exists
+        const existingUser = await User.findOne({ where: { email } });
+        if (existingUser) {
+            return res.status(400).json({ message: 'Email is already registered.' });
+        }
+
+        // Hash the password
+        const hashedPassword = await bcrypt.hash(password, 10); // 10 salt rounds
+
+        // Create new user
+        const newUser = await User.create({
+            username,
+            email,
+            password: hashedPassword
+        });
+
+        res.status(201).json({ message: 'User registered successfully!', userId: newUser.id });
+    } catch (error) {
+        console.error('Registration error:', error);
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+
+//Authenticate user
+app.get('/api/profile', isAuthenticated, (req, res) => {
+    res.json({ message: 'Welcome!', user: req.user });
+});
+
+// User Login
+app.post('/api/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        // Validate input
+        if (!email || !password) {
+            return res.status(400).json({ message: 'Email and password are required.' });
+        }
+
+        // Find user by email
+        const user = await User.findOne({ where: { email } });
+        if (!user) {
+            return res.status(401).json({ message: 'Invalid email or password.' });
+        }
+
+        // Compare password with hashed password
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            return res.status(401).json({ message: 'Invalid email or password.' });
+        }
+
+        // Create user session
+        req.session.user = { id: user.id, username: user.username, email: user.email };
+
+        res.json({ message: 'Login successful!', user: req.session.user });
+    } catch (error) {
+        console.error('Login error:', error);
+        res.status(500).json({ message: 'Internal server error' });
+    }
+});
+// Logout user
+app.post('/api/logout', (req, res) => {
+    if (req.session) {
+        req.session.destroy(err => {
+            if (err) {
+                console.error('Logout error:', err);
+                return res.status(500).json({ message: 'Failed to log out.' });
+            }
+            res.clearCookie('connect.sid');
+            return res.json({ message: 'Logged out successfully.' });
+        });
+    } else {
+        return res.status(400).json({ message: 'No active session.' });
+    }
+});
 // PROJECT ROUTES
 
 // GET /api/projects - Get all projects
-app.get('/api/projects', async (req, res) => {
+app.get('/api/projects', isAuthenticated, async (req, res) => {
     try {
         const projects = await Project.findAll();
         res.json(projects);
@@ -33,7 +134,7 @@ app.get('/api/projects', async (req, res) => {
 });
 
 // GET /api/projects/:id - Get project by ID
-app.get('/api/projects/:id', async (req, res) => {
+app.get('/api/projects/:id', isAuthenticated, async (req, res) => {
     try {
         const project = await Project.findByPk(req.params.id);
         
@@ -49,7 +150,7 @@ app.get('/api/projects/:id', async (req, res) => {
 });
 
 // POST /api/projects - Create new project
-app.post('/api/projects', async (req, res) => {
+app.post('/api/projects', isAuthenticated, async (req, res) => {
     try {
         const { name, description, status, dueDate } = req.body;
         
@@ -57,7 +158,8 @@ app.post('/api/projects', async (req, res) => {
             name,
             description,
             status,
-            dueDate
+            dueDate,
+            userId: req.session.user.id
         });
         
         res.status(201).json(newProject);
@@ -68,7 +170,7 @@ app.post('/api/projects', async (req, res) => {
 });
 
 // PUT /api/projects/:id - Update existing project
-app.put('/api/projects/:id', async (req, res) => {
+app.put('/api/projects/:id', isAuthenticated, async (req, res) => {
     try {
         const { name, description, status, dueDate } = req.body;
         
